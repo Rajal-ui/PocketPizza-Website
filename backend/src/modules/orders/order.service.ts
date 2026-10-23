@@ -376,17 +376,14 @@ export async function createOrder(input: CreateOrderRequest): Promise<{
         total: quote.total,
         items: orderItems,
       });
-      // Post-commit, fire-and-forget (Day 9): both WhatsApp messages dispatch
-      // AFTER the transaction commits, are never awaited by this request, and
-      // cannot roll back or invalidate the order that was just created.
+      // Post-commit, fire-and-forget: the customer WhatsApp confirmation is
+      // dispatched AFTER the transaction commits, is never awaited by this
+      // request, and cannot roll back or invalidate the order just created.
       dispatchOrderNotifications({
         orderId: order.id,
         orderNumber: order.orderNumber,
         customerPhone: phone,
-        orderType: input.orderType,
         total: toFixed2(order.total.toString()),
-        items: order.items.map((i) => ({ nameSnapshot: i.nameSnapshot, quantity: i.quantity })),
-        restaurantId: restaurant.id,
       });
       return { data: toCreateResponse(order), created: true };
     } catch (err) {

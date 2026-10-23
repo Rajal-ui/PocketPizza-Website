@@ -19,11 +19,10 @@ const envSchema = z.object({
   CORS_ORIGIN: z.string().optional().default('http://localhost:3000'),
   SHOP_LATITUDE: optionalShopCoordinate(-90, 90),
   SHOP_LONGITUDE: optionalShopCoordinate(-180, 180),
-  TWILIO_ACCOUNT_SID: z.string().optional().default(''),
-  TWILIO_AUTH_TOKEN: z.string().optional().default(''),
-  TWILIO_WHATSAPP_NUMBER: z.string().optional().default(''),
-  CUSTOMER_TEMPLATE_SID: z.string().optional().default(''),
-  ADMIN_TEMPLATE_SID: z.string().optional().default(''),
+  BSP_API_KEY: z.string().optional().default(''),
+  BSP_API_ENDPOINT: z.string().optional().default(''),
+  BSP_WHATSAPP_NUMBER: z.string().optional().default(''),
+  CUSTOMER_TEMPLATE_NAME: z.string().optional().default(''),
   LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace']).default('info'),
 });
 

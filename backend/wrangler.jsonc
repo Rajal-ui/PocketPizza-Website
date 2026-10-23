@@ -17,6 +17,9 @@
     "CORS_ORIGIN": "http://localhost:3000",
     "SHOP_LATITUDE": "18.456165955627945",
     "SHOP_LONGITUDE": "73.86959266088635",
+    "BSP_API_ENDPOINT": "https://api.ycloud.com/v2/whatsapp/messages",
+    "BSP_WHATSAPP_NUMBER": "+918788197404",
+    "CUSTOMER_TEMPLATE_NAME": "pokket_pizza_order_confirmation",
     "LOG_LEVEL": "info"
   }
 }

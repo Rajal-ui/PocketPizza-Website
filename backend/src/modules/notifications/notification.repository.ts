@@ -35,18 +35,3 @@ export async function createAttempt(input: CreateAttemptInput) {
     },
   });
 }
-
-export async function findByProviderMessageId(providerMessageId: string) {
-  const prisma = await getPrisma();
-  return prisma.notification.findFirst({
-    where: { providerMessageId, channel: NOTIFICATION_CHANNEL_WHATSAPP },
-  });
-}
-
-export async function markDeliveryStatus(id: string, status: string, errorMessage: string | null) {
-  const prisma = await getPrisma();
-  return prisma.notification.update({
-    where: { id },
-    data: { status, errorMessage },
-  });
-}
