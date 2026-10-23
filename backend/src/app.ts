@@ -14,7 +14,6 @@ import { authRouter } from './modules/auth/auth.routes';
 import { adminRouter } from './modules/admin/admin.routes';
 import { orderRouter } from './modules/orders/order.routes';
 import { restaurantRouter } from './modules/restaurant/restaurant.routes';
-import { twilioWebhookRouter } from './modules/notifications/notification.routes';
 import { customerRouter } from './modules/customer/customer.routes';
 
 // access logs must never carry capability tokens: publicToken sits in the
@@ -128,9 +127,6 @@ app.route('/api/v1/customer', customerRouter);
 app.route('/api/v1', menuRouter);
 app.route('/api/v1', orderRouter);
 app.route('/api/v1', restaurantRouter);
-
-// Twilio status callbacks live outside /api/v1 and are signed, not cookie-authed
-app.route('/api/webhooks', twilioWebhookRouter);
 
 app.notFound(handleNotFound);
 
