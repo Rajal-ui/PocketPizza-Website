@@ -68,7 +68,7 @@ async function main() {
 data: {
         name: "Pokket Pizza",
         phone: "9998887770",
-        whatsappNumber: "8788197404",
+        whatsappNumber: "+918788197404",
         address: "Pune, Maharashtra",
         deliveryFee: 30,
       },

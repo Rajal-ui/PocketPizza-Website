@@ -73,11 +73,8 @@ coverage/
 tmp/
 temp/
 
-# --- Design source files (binary — not diffable) ---
-# Keep markdown docs; ignore binary design assets and PDFs inside docs/.
-docs/*
-!docs/*.md
-doc/
+# --- Design source files and agents ---
+docs/
 AGENTS.md   
 opencode.json
 .opencode/
