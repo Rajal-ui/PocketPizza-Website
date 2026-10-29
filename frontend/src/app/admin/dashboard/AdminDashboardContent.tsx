@@ -1,39 +1,32 @@
 "use client";
 
 import React from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
   ALLOWED_TRANSITIONS,
+  useAdminBoardOrders,
   useAdminOrderDetail,
-  useAdminOrders,
   useUpdateOrderStatus,
 } from "@/lib/api/admin";
 import { useAdminSession } from "@/lib/api/auth";
 import { formatINR } from "@/lib/money";
 import { ApiError } from "@/lib/api/client";
 import { Button } from "@/components/ui/Button";
-import { ErrorState } from "@/components/ui/LayoutPrimitives";
+import { ErrorState, Skeleton } from "@/components/ui/LayoutPrimitives";
 import { KanbanBoard, KanbanOrder } from "@/components/admin/KanbanBoard";
 import { getOrderTransitions, OrderActionButton } from "@/components/admin/OrderActionButton";
 import type { OrderStatus, OrderType } from "@shared/contract/contract";
 
 /**
  * Admin dashboard — Backend Master Reference §11.7–11.9, §14, §17.
- * Kanban Board across 7 statuses: NEW, CONFIRMED, PREPARING, READY, OUT_FOR_DELIVERY, COMPLETED, CANCELLED.
+ * Kanban Board across active statuses: NEW, CONFIRMED, PREPARING, READY, OUT_FOR_DELIVERY, COMPLETED.
  */
 
-type StatusFilter = "ALL" | OrderStatus;
-
-const FILTER_STATUS_GROUPS: Record<StatusFilter, readonly OrderStatus[]> = {
-  ALL: ["NEW", "CONFIRMED", "PREPARING", "READY", "OUT_FOR_DELIVERY", "COMPLETED", "CANCELLED"],
-  NEW: ["NEW"],
-  CONFIRMED: ["CONFIRMED"],
-  PREPARING: ["PREPARING"],
-  READY: ["READY"],
-  OUT_FOR_DELIVERY: ["OUT_FOR_DELIVERY"],
-  COMPLETED: ["COMPLETED"],
-  CANCELLED: ["CANCELLED"],
-};
+type StatusFilter = "ALL" | Exclude<OrderStatus, "CANCELLED">;
+const BOARD_STATUSES: Exclude<OrderStatus, "CANCELLED">[] = [
+  "NEW", "CONFIRMED", "PREPARING", "READY", "OUT_FOR_DELIVERY", "COMPLETED",
+];
 
 const ORDER_FILTERS: { key: StatusFilter; label: string }[] = [
   { key: "ALL", label: "All Orders" },
@@ -42,8 +35,7 @@ const ORDER_FILTERS: { key: StatusFilter; label: string }[] = [
   { key: "PREPARING", label: "Preparing" },
   { key: "READY", label: "Ready to Handoff" },
   { key: "OUT_FOR_DELIVERY", label: "Out for Delivery" },
-  { key: "COMPLETED", label: "Completed" },
-  { key: "CANCELLED", label: "Cancelled" },
+  { key: "COMPLETED", label: "Completed today" },
 ];
 
 const EMPTY_MESSAGES: Record<StatusFilter, string> = {
@@ -53,9 +45,31 @@ const EMPTY_MESSAGES: Record<StatusFilter, string> = {
   PREPARING: "No preparing orders",
   READY: "No ready-to-handoff orders",
   OUT_FOR_DELIVERY: "No orders out for delivery",
-  COMPLETED: "No completed orders",
-  CANCELLED: "No cancelled orders",
+  COMPLETED: "No completed orders today",
 };
+
+type CountQuery = { data?: unknown[]; isPending: boolean; isError: boolean };
+
+function StatusCount({ query }: { query: CountQuery }) {
+  if (query.isError) return <span title="Could not load this count" aria-label="Count unavailable">!</span>;
+  if (query.isPending) return <span aria-label="Loading count" title="Loading count" className="inline-block h-2 w-2 animate-pulse rounded-full bg-current align-middle" />;
+  const count = query.data?.length ?? 0;
+  return <>{count === 100 ? "100+" : count}</>;
+}
+
+function AllOrdersCount({ queries }: { queries: CountQuery[] }) {
+  if (queries.some((query) => query.isError)) {
+    return <span title="Some order counts could not be loaded" aria-label="Count unavailable">!</span>;
+  }
+  const hasData = queries.some((query) => query.data !== undefined);
+  const isPending = queries.some((query) => query.isPending);
+  if (!hasData && isPending) {
+    return <Skeleton aria-hidden="true" className="h-4 w-7 rounded-full" />;
+  }
+  const count = queries.reduce((sum, query) => sum + (query.data?.length ?? 0), 0);
+  const hasMore = queries.some((query) => query.data?.length === 100);
+  return <>{hasMore ? `${count}+` : count}{isPending && <span aria-label="Some statuses are loading" title="Some statuses are loading" className="ml-1 inline-block h-2 w-2 animate-pulse rounded-full bg-current align-middle" />}</>;
+}
 
 export function AdminDashboardContent() {
   const router = useRouter();
@@ -65,7 +79,12 @@ export function AdminDashboardContent() {
   const [typeFilter, setTypeFilter] = React.useState<OrderType | undefined>(undefined);
   const [selectedId, setSelectedId] = React.useState<string | null>(null);
 
-  const orders = useAdminOrders({ type: typeFilter, page: 1, pageSize: 100 });
+  const boardQueries = useAdminBoardOrders(typeFilter);
+  const allBoardQueries = BOARD_STATUSES.map((status) => boardQueries[status]);
+  const selectedQueries = statusFilter === "ALL" ? allBoardQueries : [boardQueries[statusFilter]];
+  const hasSelectedQueryData = selectedQueries.some((query) => query.data !== undefined);
+  const isBoardLoading = !hasSelectedQueryData && selectedQueries.some((query) => query.isPending);
+  const failedListQueries = selectedQueries.filter((query) => query.isError);
   const detail = useAdminOrderDetail(selectedId ?? undefined);
   const updateStatus = useUpdateOrderStatus(selectedId ?? "");
   const [statusError, setStatusError] = React.useState<string | null>(null);
@@ -97,13 +116,17 @@ export function AdminDashboardContent() {
   if (session.isLoading) return <p className="py-12 text-body">Checking session…</p>;
   if (session.data?.ok === false) return null;
 
-  const list: KanbanOrder[] = Array.isArray(orders.data)
-    ? (orders.data as KanbanOrder[])
-    : ((orders.data as { items?: KanbanOrder[] })?.items ?? []);
-
-  const filteredOrders = list.filter((order) => FILTER_STATUS_GROUPS[statusFilter].includes(order.status));
-  const boardOrders = filteredOrders;
+  const boardOrders = (statusFilter === "ALL"
+    ? allBoardQueries.flatMap((query) => query.data ?? [])
+    : boardQueries[statusFilter].data ?? []) as KanbanOrder[];
   const selectedFilterLabel = ORDER_FILTERS.find((filter) => filter.key === statusFilter)?.label ?? "All Orders";
+  const getMobileFilterCount = (key: StatusFilter) => {
+    const queries = key === "ALL" ? allBoardQueries : [boardQueries[key]];
+    if (queries.some((query) => query.isError)) return "!";
+    if (queries.some((query) => query.isPending)) return "…";
+    const count = queries.reduce((sum, query) => sum + (query.data?.length ?? 0), 0);
+    return queries.some((query) => query.data?.length === 100) ? `${count}+` : String(count);
+  };
   const detailTransitions = detail.data
     ? getOrderTransitions(detail.data.status, detail.data.orderType)
     : [];
@@ -124,7 +147,6 @@ export function AdminDashboardContent() {
     }
     try {
       await updateStatus.mutateAsync({ status: next });
-      await orders.refetch();
     } catch (err) {
       const api = err as ApiError;
       setStatusError(api?.message || "Status update failed.");
@@ -139,18 +161,11 @@ export function AdminDashboardContent() {
 
       {statusError && <ErrorState message={statusError} />}
 
-      {orders.isError && (
-        <ErrorState message="Failed to load orders." onRetry={() => orders.refetch()} />
-      )}
-
       <div className="grid min-w-0 gap-4 lg:grid-cols-[260px_minmax(0,1fr)] xl:grid-cols-[260px_minmax(0,1fr)_360px] xl:items-start">
         <aside className="min-w-0 rounded-xl border border-border-default bg-white p-3 shadow-card lg:sticky lg:top-24 lg:p-4">
           <h2 className="hidden px-2 pb-3 font-heading text-h4 font-bold text-charcoal lg:block">Orders</h2>
           <nav aria-label="Order filters" className="hidden space-y-1 lg:block">
             {ORDER_FILTERS.map((filter) => {
-              const count = filter.key === "ALL"
-                ? list.length
-                : list.filter((order) => FILTER_STATUS_GROUPS[filter.key].includes(order.status)).length;
               const active = statusFilter === filter.key;
               return (
                 <button
@@ -160,30 +175,31 @@ export function AdminDashboardContent() {
                   className={`flex w-full min-w-0 items-center justify-between gap-2 rounded-lg px-3 py-2.5 text-left text-body font-medium transition-colors ${active ? "bg-brand-red text-white" : "text-bodySecondary hover:bg-neutralTint hover:text-charcoal"}`}
                 >
                   <span className="min-w-0 break-words">{filter.label}</span>
-                  <span className={`shrink-0 rounded-full px-2 py-0.5 text-caption font-bold ${active ? "bg-white/20 text-white" : "bg-neutralTint text-bodySecondary"}`}>{count}</span>
+                  <span className={`shrink-0 rounded-full px-2 py-0.5 text-caption font-bold ${active ? "bg-white/20 text-white" : "bg-neutralTint text-bodySecondary"}`}>
+                    {filter.key === "ALL" ? <AllOrdersCount queries={allBoardQueries} /> : <StatusCount query={boardQueries[filter.key]} />}
+                  </span>
                 </button>
               );
             })}
           </nav>
-          <div className="flex min-w-0 gap-2 overflow-x-auto pb-1 lg:hidden">
-            {ORDER_FILTERS.map((filter) => {
-              const count = filter.key === "ALL"
-                ? list.length
-                : list.filter((order) => FILTER_STATUS_GROUPS[filter.key].includes(order.status)).length;
-              const active = statusFilter === filter.key;
-              return (
-                <button
-                  key={filter.key}
-                  type="button"
-                  onClick={() => setStatusFilter(filter.key)}
-                  className={`inline-flex shrink-0 items-center gap-2 rounded-full border px-4 py-2 text-caption font-semibold transition-colors ${active ? "border-brand-red bg-brand-red text-white" : "border-border-default bg-white text-bodySecondary"}`}
-                >
-              <span className="whitespace-nowrap">{filter.label}</span>
-                  <span className={`rounded-full px-1.5 py-0.5 text-tag ${active ? "bg-white/20" : "bg-neutralTint"}`}>{count}</span>
-                </button>
-              );
-            })}
-          </div>
+          <label className="block lg:hidden" htmlFor="mobile-order-status-filter">
+            <span className="sr-only">Filter orders by status</span>
+            <select
+              id="mobile-order-status-filter"
+              value={statusFilter}
+              onChange={(event) => setStatusFilter(event.target.value as StatusFilter)}
+              className="w-full rounded-lg border border-border-default bg-white px-3 py-2.5 text-body font-semibold text-charcoal focus:outline-none focus:ring-2 focus:ring-brand-red/20"
+            >
+              {ORDER_FILTERS.map((filter) => (
+                <option key={filter.key} value={filter.key}>
+                  {filter.label} ({getMobileFilterCount(filter.key)})
+                </option>
+              ))}
+            </select>
+          </label>
+          <Link href="/admin/orders/history" className="mt-3 inline-flex text-caption font-semibold text-brand-red underline underline-offset-2">
+            Older orders
+          </Link>
           <div className="mt-4 hidden border-t border-border-default pt-4 lg:block">
             <label className="block text-caption font-semibold text-bodySecondary" htmlFor="order-type-filter">Order type</label>
             <select
@@ -205,7 +221,13 @@ export function AdminDashboardContent() {
             <div>
               <h2 className="font-heading text-h4 font-bold text-charcoal">Live Orders</h2>
               <p className="mt-1 text-caption text-bodySecondary">
-                {selectedFilterLabel} · {boardOrders.length} matching orders
+                {selectedFilterLabel} · {isBoardLoading ? (
+                  <Skeleton aria-hidden="true" className="ml-1 inline-block h-3 w-8 align-middle" />
+                ) : statusFilter !== "ALL" && failedListQueries.length > 0 ? (
+                  "count unavailable"
+                ) : (
+                  `${boardOrders.length} matching orders`
+                )}
               </p>
             </div>
             <select
@@ -221,19 +243,32 @@ export function AdminDashboardContent() {
             </select>
           </div>
           <div className="min-w-0 h-[56vh] sm:h-[70vh] overflow-y-auto pr-1 rounded-lg border-t border-border-default">
-            <KanbanBoard
-              orders={boardOrders}
-              selectedId={selectedId}
-              onSelectOrder={setSelectedId}
-              emptyMessage={EMPTY_MESSAGES[statusFilter]}
-            />
+            {statusFilter === "ALL" && failedListQueries.length > 0 && (
+              <p role="status" className="px-2 py-2 text-caption text-brand-red">
+                Some order statuses could not be loaded.
+              </p>
+            )}
+            {statusFilter !== "ALL" && failedListQueries.length > 0 ? (
+              <ErrorState
+                message={`Could not load ${selectedFilterLabel.toLowerCase()}.`}
+                onRetry={() => { void Promise.all(failedListQueries.map((query) => query.refetch())); }}
+              />
+            ) : (
+              <KanbanBoard
+                orders={boardOrders}
+                selectedId={selectedId}
+                onSelectOrder={setSelectedId}
+                isLoading={isBoardLoading}
+                emptyMessage={EMPTY_MESSAGES[statusFilter]}
+              />
+            )}
           </div>
         </section>
 
         <aside className={`${selectedId ? "fixed inset-0 z-[100] flex min-h-0 flex-col bg-cream-bg p-0 pt-[env(safe-area-inset-top)] lg:static lg:z-auto lg:col-span-2 lg:block lg:rounded-xl lg:border lg:border-border-default lg:bg-white lg:p-6 lg:shadow-card xl:sticky xl:top-24 xl:col-span-1 xl:p-6" : "hidden rounded-xl border border-border-default bg-white p-4 shadow-card lg:col-span-2 lg:block xl:sticky xl:top-24 xl:col-span-1 sm:p-6"}`}>
           {selectedId ? (
-          <div className="m-3 flex min-h-0 flex-1 flex-col space-y-0 overflow-hidden rounded-3xl border border-[#eadccc] bg-white shadow-card lg:m-0 lg:overflow-visible lg:rounded-xl lg:border-0 lg:bg-transparent lg:shadow-none lg:block lg:flex-none lg:space-y-4">
-          <div className="sticky top-0 z-10 flex shrink-0 items-center gap-3 border-b border-[#eadccc] bg-white px-5 py-4 lg:static lg:justify-between lg:px-0 lg:py-0 lg:shadow-none">
+          <div className="m-3 flex min-h-0 flex-1 flex-col space-y-0 overflow-hidden rounded-3xl border border-border-default bg-white shadow-card lg:m-0 lg:overflow-visible lg:rounded-xl lg:border-0 lg:bg-transparent lg:shadow-none lg:block lg:flex-none lg:space-y-4">
+          <div className="sticky top-0 z-10 flex shrink-0 items-center gap-3 border-b border-border-default bg-white px-5 py-4 lg:static lg:justify-between lg:px-0 lg:py-0 lg:shadow-none">
             <button type="button" onClick={() => setSelectedId(null)} aria-label="Back to orders" className="grid h-10 w-10 shrink-0 place-items-center rounded-full text-charcoal hover:bg-neutralTint focus:outline-none focus:ring-2 focus:ring-brand-red lg:hidden">
               <svg aria-hidden="true" className="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="m15 18-6-6 6-6M9 12h12" /></svg>
             </button>
@@ -246,7 +281,7 @@ export function AdminDashboardContent() {
           {detail.data && (
             <div className="mt-4 min-w-0 space-y-4">
               {/* Status Header */}
-              <div className="flex min-w-0 items-start justify-between gap-2 border-b border-[#eadccc] pb-3">
+              <div className="flex min-w-0 items-start justify-between gap-2 border-b border-border-default pb-3">
                 <div className="min-w-0">
                   <div className="flex items-center gap-2">
                     <span className="break-all font-heading text-lg font-bold text-charcoal">
@@ -303,7 +338,7 @@ export function AdminDashboardContent() {
               )}
 
               {/* Order Items */}
-              <div className="min-w-0 space-y-2 border-y border-[#eadccc] py-3 text-xs">
+              <div className="min-w-0 space-y-2 border-y border-border-default py-3 text-xs">
                 <div className="flex items-center justify-between">
                   <span className="font-bold uppercase tracking-wider text-mutedGray text-caption">Order Items</span>
                   <span className="text-caption font-medium text-bodySecondary">
@@ -351,7 +386,7 @@ export function AdminDashboardContent() {
                   <span>Taxes (GST)</span>
                   <span>{formatINR(detail.data.tax)}</span>
                 </div>
-                <div className="flex items-center justify-between border-t border-[#eadccc] pt-2 text-sm font-bold text-charcoal">
+                <div className="flex items-center justify-between border-t border-border-default pt-2 text-sm font-bold text-charcoal">
                   <span>Total Amount</span>
                   <span className="text-brand-red font-heading text-base font-extrabold">{formatINR(detail.data.total)}</span>
                 </div>
